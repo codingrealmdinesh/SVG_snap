@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Test</title>
+    <script src="js/snap.svg-min.js"></script>
+    <style>
+      .static {
+        cursor: not-allowed;
+      }
+      .draggable {
+        cursor: move;
+      }
+    </style>
+  </head>
+  <body>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="1000"
+      height="1000"
+      onload="makeDraggable(evt)"
+    >
+      <line
+        name="line"
+        id="line1"
+        x1="0"
+        y1="0"
+        x2="200"
+        y2="200"
+        style="stroke: rgb(255, 0, 0); stroke-width: 3"
+        class="draggable"
+      />
+
+      <line
+        name="line"
+        id="line2"
+        x1="400"
+        y1="400"
+        x2="600"
+        y2="100"
+        style="stroke: rgb(255, 0, 0); stroke-width: 3"
+      />
+    </svg>
+    <script>
+      var thresholdgap = 20;
+
+      class Point {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+        }
+      }
+
+      function elementsOverlap(el1, el2) {
+        const domRect1 = el1.getBoundingClientRect();
+        const domRect2 = el2.getBoundingClientRect();
+
+        return !(
+          domRect1.top > domRect2.bottom ||
+          domRect1.right < domRect2.left ||
+          domRect1.bottom < domRect2.top ||
+          domRect1.left > domRect2.right
+        );
+      }
+
+      function onSegment(p, q, r) {
+        if (
+          q.x <= Math.max(p.x, r.x) &&
+          q.x >= Math.min(p.x, r.x) &&
+          q.y <= Math.max(p.y, r.y) &&
+          q.y >= Math.min(p.y, r.y)
+        )
+          return true;
+
+        return false;
+      }
+
+      function orientation(p, q, r) {
+        let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+
+        if (val == 0) return 0; // collinear
+
+        return val > 0 ? 1 : 2; // clock or counterclock wise
+      }
+
+      function doIntersect(p1, q1, p2, q2) {
+        // Find the four orientations needed for general and
+        // special cases
+        let o1 = orientation(p1, q1, p2);
+        let o2 = orientation(p1, q1, q2);
+        let o3 = orientation(p2, q2, p1);
+        let o4 = orientation(p2, q2, q1);
+
+        // General case
+        if (o1 != o2 && o3 != o4) return true;
+
+        // Special Cases
+        // p1, q1 and p2 are collinear and p2 lies on segment p1q1
+        if (o1 == 0 && onSegment(p1, p2, q1)) return true;
+
+        // p1, q1 and q2 are collinear and q2 lies on segment p1q1
+        if (o2 == 0 && onSegment(p1, q2, q1)) return true;
+
+        // p2, q2 and p1 are collinear and p1 lies on segment p2q2
+        if (o3 == 0 && onSegment(p2, p1, q2)) return true;
+
+        // p2, q2 and q1 are collinear and q1 lies on segment p2q2
+        if (o4 == 0 && onSegment(p2, q1, q2)) return true;
+
+        return false; // Doesn't fall in any of the above cases
+      }
+
+      function getIntersectionPoint(p1, p2, p3, p4) {
+        var c2x = p3.x - p4.x;
+        var c3x = p1.x - p2.x;
+        var c2y = p3.y - p4.y;
+        var c3y = p1.y - p2.y;
+
+        var d = c3x * c2y - c3y * c2x;
+
+        if (d == 0) {
+          throw new Error("Number of intersection points is zero or infinity.");
+        }
+        var u1 = p1.x * p2.y - p1.y * p2.x; // (x1 * y2 - y1 * x2)
+        var u4 = p3.x * p4.y - p3.y * p4.x; // (x3 * y4 - y3 * x4)
+
+        var px = (u1 * c2x - c3x * u4) / d;
+        var py = (u1 * c2y - c3y * u4) / d;
+
+        var output = new Point(px, py);
+        return output;
+      }
+
+      function makeDraggable(evt) {
+        var svg = evt.target;
+        var selectedElement, offset, transform, movingend;
+        svg.addEventListener("mousedown", startDrag);
+        svg.addEventListener("mousemove", drag);
+        svg.addEventListener("mouseup", endDrag);
+
+        function getMousePosition(evt) {
+          var CTM = svg.getScreenCTM();
+          return {
+            x: (evt.clientX - CTM.e) / CTM.a,
+            y: (evt.clientY - CTM.f) / CTM.d,
+          };
+        }
+
+        function startDrag(evt) {
+          if (evt.target.classList.contains("draggable")) {
+            selectedElement = evt.target;
+            offset = getMousePosition(evt);
+            // Get all the transforms currently on this element
+            var transforms = selectedElement.transform.baseVal;
+            // Ensure the first transform is a translate transform
+            if (
+              transforms.length === 0 ||
+              transforms.getItem(0).type !==
+                SVGTransform.SVG_TRANSFORM_TRANSLATE
+            ) {
+              // Create an transform that translates by (0, 0)
+              var translate = svg.createSVGTransform();
+              translate.setTranslate(0, 0);
+              // Add the translation to the front of the transforms list
+              selectedElement.transform.baseVal.insertItemBefore(translate, 0);
+            }
+            // Get initial translation amount
+            transform = transforms.getItem(0);
+            offset.x -= transform.matrix.e;
+            offset.y -= transform.matrix.f;
+          }
+        }
+
+        function drag(evt) {
+          if (selectedElement) {
+            evt.preventDefault();
+            var coord = getMousePosition(evt);
+            transform.setTranslate(coord.x - offset.x, coord.y - offset.y);
+          }
+        }
+
+        function util(evt, p1, q1, p2, q2, isStartEnd) {
+          if (doIntersect(p1, q1, p2, q2)) {
+            var intersectionPoint = getIntersectionPoint(p1, q1, p2, q2);
+            evt.preventDefault();
+            var coord = getMousePosition(evt);
+            if (isStartEnd) {
+              transform.setTranslate(intersectionPoint.x, intersectionPoint.y);
+            } else {
+              transform.setTranslate(
+                intersectionPoint.x - movingend.x,
+                intersectionPoint.y - movingend.y
+              );
+            }
+            return true;
+          } else {
+            return false;
+          }
+        }
+
+        function endDrag(evt) {
+          var source = selectedElement;
+          var dest = document.getElementById("line2");
+
+          p2 = new Point(dest.getAttribute("x1"), dest.getAttribute("y1"));
+          q2 = new Point(dest.getAttribute("x2"), dest.getAttribute("y2"));
+          var sourcex = transform.matrix.e.toFixed();
+          var sourcey = transform.matrix.f.toFixed();
+          // moving end point
+          {
+            movingend = new Point(
+              parseInt(source.getAttribute("x2")),
+              parseInt(source.getAttribute("y2"))
+            );
+            var p1x = parseInt(sourcex) + movingend.x;
+            var p1y = parseInt(sourcey) + movingend.y;
+            p1 = new Point(p1x, p1y);
+            var flag = false;
+            //direction east
+            q1 = new Point(p1x + thresholdgap, p1y);
+            flag = util(evt, p1, q1, p2, q2, false);
+            //direction west
+            q1 = new Point(p1x - thresholdgap, p1y);
+            flag = util(evt, p1, q1, p2, q2, false);
+
+            if (!flag) {
+              //direction north
+              q1 = new Point(p1x, p1y - thresholdgap);
+              flag = util(evt, p1, q1, p2, q2, false);
+              //direction south
+              q1 = new Point(p1x, p1y + thresholdgap);
+              flag = util(evt, p1, q1, p2, q2, false);
+            }
+          }
+
+          // moving start point
+          {
+            var p1x = parseInt(sourcex);
+            var p1y = parseInt(sourcey);
+            p1 = new Point(p1x, p1y);
+            var flag = false;
+            //direction east
+            q1 = new Point(p1x + thresholdgap, p1y);
+            flag = util(evt, p1, q1, p2, q2, true);
+            //direction west
+            q1 = new Point(p1x - thresholdgap, p1y);
+            flag = util(evt, p1, q1, p2, q2, true);
+
+            if (!flag) {
+              //direction north
+              q1 = new Point(p1x, p1y - thresholdgap);
+              flag = util(evt, p1, q1, p2, q2, true);
+              //direction south
+              q1 = new Point(p1x, p1y + thresholdgap);
+              flag = util(evt, p1, q1, p2, q2, true);
+            }
+          }
+
+          selectedElement = null;
+        }
+      }
+    </script>
+    <h1>dinesh is getting on track</h1>
+  </body>
+</html>

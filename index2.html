@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Test</title>
+    <style>
+      .static {
+        cursor: not-allowed;
+      }
+      .draggable {
+        cursor: move;
+      }
+    </style>
+  </head>
+  <body>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="1000"
+      height="1000"
+      onload="makeDraggable(evt)"
+    >
+      <line
+        name="line"
+        id="line1"
+        x1="0"
+        y1="0"
+        x2="200"
+        y2="200"
+        style="stroke: rgb(255, 0, 0); stroke-width: 3"
+        class="draggable"
+      />
+      <line
+        name="line"
+        id="2"
+        x1="400"
+        y1="400"
+        x2="600"
+        y2="100"
+        style="stroke: rgb(34, 0, 255); stroke-width: 3"
+      />
+      <rect
+        x="-20"
+        y="-20"
+        width="10"
+        height="10"
+        id="snapIndicatorSquare2"
+        style="fill: #ffffff; stroke: green; stroke-width: 3; fill-opacity: 0"
+      />
+      <line
+        name="line"
+        id="3"
+        x1="20"
+        y1="400"
+        x2="100"
+        y2="400"
+        style="stroke: rgb(4, 4, 4); stroke-width: 3"
+      />
+      <rect
+        x="-20"
+        y="-20"
+        width="10"
+        height="10"
+        id="snapIndicatorSquare3"
+        style="fill: #ffffff; stroke: green; stroke-width: 3; fill-opacity: 0"
+      />
+      <line
+        name="line"
+        id="0"
+        x1="20"
+        y1="20"
+        x2="20"
+        y2="200"
+        style="stroke: rgb(22, 92, 37); stroke-width: 3"
+      />
+      <rect
+        x="-20"
+        y="-20"
+        width="10"
+        height="10"
+        id="snapIndicatorSquare0"
+        style="fill: #ffffff; stroke: green; stroke-width: 3; fill-opacity: 0"
+      />
+    </svg>
+    <script>
+      var thresholdgap = 20;
+
+      class Point {
+        constructor(x, y) {
+          this.x = x;
+          this.y = y;
+        }
+      }
+
+      /*function elementsOverlap(el1, el2) {
+        const domRect1 = el1.getBoundingClientRect();
+        const domRect2 = el2.getBoundingClientRect();
+
+        return !(
+          domRect1.top > domRect2.bottom ||
+          domRect1.right < domRect2.left ||
+          domRect1.bottom < domRect2.top ||
+          domRect1.left > domRect2.right
+        );
+      }*/
+
+      function onSegment(p, q, r) {
+        if (
+          q.x <= Math.max(p.x, r.x) &&
+          q.x >= Math.min(p.x, r.x) &&
+          q.y <= Math.max(p.y, r.y) &&
+          q.y >= Math.min(p.y, r.y)
+        )
+          return true;
+
+        return false;
+      }
+
+      function orientation(p, q, r) {
+        let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+
+        if (val == 0) return 0;
+
+        return val > 0 ? 1 : 2;
+      }
+
+      function doIntersect(p1, q1, p2, q2) {
+        let o1 = orientation(p1, q1, p2);
+        let o2 = orientation(p1, q1, q2);
+        let o3 = orientation(p2, q2, p1);
+        let o4 = orientation(p2, q2, q1);
+
+        if (o1 != o2 && o3 != o4) return true;
+
+        if (o1 == 0 && onSegment(p1, p2, q1)) return true;
+
+        if (o2 == 0 && onSegment(p1, q2, q1)) return true;
+
+        if (o3 == 0 && onSegment(p2, p1, q2)) return true;
+
+        if (o4 == 0 && onSegment(p2, q1, q2)) return true;
+
+        return false;
+      }
+
+      function getIntersectionPoint(p1, p2, p3, p4) {
+        var c2x = p3.x - p4.x;
+        var c3x = p1.x - p2.x;
+        var c2y = p3.y - p4.y;
+        var c3y = p1.y - p2.y;
+
+        var d = c3x * c2y - c3y * c2x;
+
+        if (d == 0) {
+          return;
+        }
+        var u1 = p1.x * p2.y - p1.y * p2.x;
+        var u4 = p3.x * p4.y - p3.y * p4.x;
+
+        var px = (u1 * c2x - c3x * u4) / d;
+        var py = (u1 * c2y - c3y * u4) / d;
+
+        var output = new Point(px, py);
+        return output;
+      }
+
+      function makeDraggable(evt) {
+        var svg = evt.target;
+        var selectedElement,
+          offset,
+          transform,
+          movingend,
+          previousTime,
+          intersectionPoint,
+          p1,
+          snapIndicatorSquare;
+        previousTime = new Date();
+        svg.addEventListener("mousedown", startDrag);
+        svg.addEventListener("mousemove", drag);
+        svg.addEventListener("mouseup", endDrag);
+
+        function getMousePosition(evt) {
+          var CTM = svg.getScreenCTM();
+          return {
+            x: (evt.clientX - CTM.e) / CTM.a,
+            y: (evt.clientY - CTM.f) / CTM.d,
+          };
+        }
+
+        function startDrag(evt) {
+          if (evt.target.classList.contains("draggable")) {
+            selectedElement = evt.target;
+            offset = getMousePosition(evt);
+            // Get all the transforms currently on this element
+            var transforms = selectedElement.transform.baseVal;
+            // Ensure the first transform is a translate transform
+            if (
+              transforms.length === 0 ||
+              transforms.getItem(0).type !==
+                SVGTransform.SVG_TRANSFORM_TRANSLATE
+            ) {
+              // Create an transform that translates by (0, 0)
+              var translate = svg.createSVGTransform();
+              translate.setTranslate(0, 0);
+              // Add the translation to the front of the transforms list
+              selectedElement.transform.baseVal.insertItemBefore(translate, 0);
+            }
+            // Get initial translation amount
+            transform = transforms.getItem(0);
+            offset.x -= transform.matrix.e;
+            offset.y -= transform.matrix.f;
+          }
+        }
+
+        function util(evt, p1, q1, p2, q2, isStartEnd) {
+          if (doIntersect(p1, q1, p2, q2)) {
+            intersectionPoint = getIntersectionPoint(p1, q1, p2, q2);
+            evt.preventDefault();
+            var coord = getMousePosition(evt);
+            if (isStartEnd) {
+              if (intersectionPoint == null) {
+                transform.setTranslate(p1.x, p2.y);
+              } else {
+                transform.setTranslate(
+                  intersectionPoint.x,
+                  intersectionPoint.y
+                );
+              }
+            } else {
+              transform.setTranslate(
+                intersectionPoint.x - movingend.x,
+                intersectionPoint.y - movingend.y
+              );
+            }
+
+            if (intersectionPoint != null) {
+              snapIndicatorSquare.style.visibility = "visible";
+              snapIndicatorSquare.setAttribute(
+                "x",
+                intersectionPoint.x - 5 / Math.sqrt(2)
+              );
+              snapIndicatorSquare.setAttribute(
+                "y",
+                intersectionPoint.y - 5 / Math.sqrt(2)
+              );
+            }
+
+            return 1;
+          } else {
+            return 0;
+          }
+        }
+
+        function snapLineElement(evt, selectedElement) {
+          var source = selectedElement;
+          var destlist = document.getElementsByName("line");
+          destlist.forEach(function (dest) {
+            if (dest != source) {
+              snapIndicatorSquare = document.getElementById(
+                "snapIndicatorSquare" + dest.id
+              );
+              p2 = new Point(dest.getAttribute("x1"), dest.getAttribute("y1"));
+              q2 = new Point(dest.getAttribute("x2"), dest.getAttribute("y2"));
+              var sourcex = transform.matrix.e.toFixed();
+              var sourcey = transform.matrix.f.toFixed();
+              // moving end point
+              movingend = new Point(
+                parseInt(source.getAttribute("x2")),
+                parseInt(source.getAttribute("y2"))
+              );
+              var p1x = parseInt(sourcex) + movingend.x;
+              var p1y = parseInt(sourcey) + movingend.y;
+              p1 = new Point(p1x, p1y);
+              var flag = 0;
+              //direction east
+              q1 = new Point(p1x + thresholdgap, p1y);
+              flag += util(evt, p1, q1, p2, q2, false);
+              //direction west
+              if (flag == 0) {
+                q1 = new Point(p1x - thresholdgap, p1y);
+                flag += util(evt, p1, q1, p2, q2, false);
+              }
+
+              if (flag == 0) {
+                //direction north
+                q1 = new Point(p1x, p1y - thresholdgap);
+                flag += util(evt, p1, q1, p2, q2, false);
+              }
+              if (flag == 0) {
+                //direction south
+                q1 = new Point(p1x, p1y + thresholdgap);
+                flag += util(evt, p1, q1, p2, q2, false);
+              }
+
+              // moving start point
+              p1x = parseInt(sourcex);
+              p1y = parseInt(sourcey);
+              p1 = new Point(p1x, p1y);
+              //direction east
+              q1 = new Point(p1x + thresholdgap, p1y);
+              flag += util(evt, p1, q1, p2, q2, true);
+              //direction west
+              if (flag == 0) {
+                q1 = new Point(p1x - thresholdgap, p1y);
+                flag += util(evt, p1, q1, p2, q2, true);
+              }
+
+              if (flag == 0) {
+                //direction north
+                q1 = new Point(p1x, p1y - thresholdgap);
+                flag += util(evt, p1, q1, p2, q2, true);
+              }
+              //direction south
+              if (flag == 0) {
+                q1 = new Point(p1x, p1y + thresholdgap);
+                flag += util(evt, p1, q1, p2, q2, true);
+              }
+              if (flag == 0) {
+                snapIndicatorSquare.style.visibility = "hidden";
+              } else {
+                snapIndicatorSquare.style.visibility = "visible";
+              }
+            }
+          });
+        }
+
+        function drag(evt) {
+          if (selectedElement) {
+            var currentTime = new Date();
+            if (currentTime - previousTime > 10) {
+              previousTime = currentTime;
+              evt.preventDefault();
+              var coord = getMousePosition(evt);
+              transform.setTranslate(coord.x - offset.x, coord.y - offset.y);
+              if (selectedElement.nodeName == "line") {
+                snapLineElement(evt, selectedElement);
+              }
+            }
+          }
+        }
+
+        function endDrag(evt) {
+          var destlist = document.getElementsByName("line");
+          destlist.forEach(function (dest) {
+            if (dest != selectedElement) {
+              snapIndicatorSquare = document.getElementById(
+                "snapIndicatorSquare" + dest.id
+              );
+              snapIndicatorSquare.style.visibility = "hidden";
+            }
+          });
+
+          selectedElement = null;
+        }
+      }
+    </script>
+  </body>
+</html>
